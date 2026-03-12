@@ -10,11 +10,17 @@ if (session_status() === PHP_SESSION_NONE) {
 if (isset($_GET['action']) && $_GET['action'] === 'get_announcement' && isset($_GET['id'])) {
     header('Content-Type: application/json; charset=utf-8');
     $id = intval($_GET['id']);
-    $stmt = mysqli_prepare($conn, "SELECT * FROM announcements WHERE id = ? AND is_active = 1");
+    $stmt = mysqli_prepare($conn, "SELECT a.*, u.first_name, u.last_name
+                                    FROM announcements a
+                                    LEFT JOIN users u ON a.created_by = u.id
+                                    WHERE a.id = ? AND a.is_active = 1");
     mysqli_stmt_bind_param($stmt, "i", $id);
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
     if ($row = mysqli_fetch_assoc($result)) {
+        $row['author'] = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
+        if (empty($row['author'])) $row['author'] = 'Admin';
+        $row['date'] = date('M j, Y', strtotime($row['published_at'] ?? $row['created_at']));
         echo json_encode(['success' => true, 'announcement' => $row]);
     } else {
         echo json_encode(['success' => false, 'message' => 'Announcement not found']);
@@ -903,13 +909,20 @@ if (isset($_SESSION['message'])) {
                 <div class="splide__track">
                     <ul class="splide__list">
                         <?php
-                        // Fetch active announcements from database
-                        $announcementQuery = "SELECT * FROM announcements WHERE is_active = 1 ORDER BY date_posted DESC";
+                        // Fetch active announcements from database with author name
+                        $announcementQuery = "SELECT a.*, u.first_name, u.last_name
+                                              FROM announcements a
+                                              LEFT JOIN users u ON a.created_by = u.id
+                                              WHERE a.is_active = 1
+                                              AND (a.expires_at IS NULL OR a.expires_at > NOW())
+                                              ORDER BY a.created_at DESC";
                         $announcementResult = mysqli_query($conn, $announcementQuery);
-                        
+
                         if ($announcementResult && mysqli_num_rows($announcementResult) > 0) {
                             while ($announcement = mysqli_fetch_assoc($announcementResult)) {
-                                $formattedDate = date('M j, Y', strtotime($announcement['date_posted']));
+                                $formattedDate = date('M j, Y', strtotime($announcement['published_at'] ?? $announcement['created_at']));
+                                $authorName = trim(($announcement['first_name'] ?? '') . ' ' . ($announcement['last_name'] ?? ''));
+                                if (empty($authorName)) $authorName = 'Admin';
                                 $categoryClass = getCategoryClass($announcement['category']);
                         ?>
                         <li class="splide__slide">
@@ -920,20 +933,20 @@ if (isset($_SESSION['message'])) {
                                     </span>
                                     <span class="text-sm text-gray-500"><?php echo $formattedDate; ?></span>
                                 </div>
-                                
+
                                 <h3 class="text-xl font-inter font-semibold text-gray-800 mb-3">
                                     <?php echo htmlspecialchars($announcement['title']); ?>
                                 </h3>
-                                
+
                                 <p class="text-gray-600 mb-4 line-clamp-3">
-                                    <?php echo htmlspecialchars($announcement['content']); ?>
+                                    <?php echo htmlspecialchars(substr(strip_tags($announcement['content']), 0, 200)); ?>
                                 </p>
-                                
+
                                 <div class="flex items-center justify-between mt-auto">
-                                    <span class="text-sm text-gray-500">By: <?php echo htmlspecialchars($announcement['author']); ?></span>
-                                    <button onclick="openAnnouncementModal(<?php echo $announcement['id']; ?>)" 
+                                    <span class="text-sm text-gray-500">By: <?php echo htmlspecialchars($authorName); ?></span>
+                                    <button onclick="openAnnouncementModal(<?php echo $announcement['id']; ?>)"
                                             class="text-primary hover:text-primary-dark text-sm font-medium transition-colors">
-                                        Read More →
+                                        Read More &rarr;
                                     </button>
                                 </div>
                             </div>
@@ -941,7 +954,6 @@ if (isset($_SESSION['message'])) {
                         <?php
                             }
                         } else {
-                            // Show placeholder if no announcements
                         ?>
                         <li class="splide__slide">
                             <div class="announcement-card bg-white rounded-xl shadow-lg border border-gray-100 p-6 h-full text-center">
@@ -956,22 +968,20 @@ if (isset($_SESSION['message'])) {
                         </li>
                         <?php
                         }
-                        
+
                         // Helper function for category styling
                         function getCategoryClass($category) {
                             switch (strtoupper($category)) {
                                 case 'MAINTENANCE':
                                     return 'bg-yellow-100 text-yellow-800';
-                                case 'UPDATE':
-                                    return 'bg-blue-100 text-blue-800';
+                                case 'HEALTH_ADVISORY':
+                                    return 'bg-red-100 text-red-800';
                                 case 'EVENT':
                                     return 'bg-green-100 text-green-800';
-                                case 'SECURITY':
-                                    return 'bg-red-100 text-red-800';
-                                case 'FINANCE':
+                                case 'PROMOTION':
                                     return 'bg-purple-100 text-purple-800';
                                 default:
-                                    return 'bg-gray-100 text-gray-800';
+                                    return 'bg-blue-100 text-blue-800';
                             }
                         }
                         ?>

@@ -522,34 +522,40 @@ function fetchAnnouncementDetails(announcementId) {
         '<p class="text-gray-500 mt-4">Loading announcement...</p>' +
         '</div>';
 
-    // Simulate API call - replace with actual AJAX call using announcementId
-    setTimeout(function() {
-        var sampleData = {
-            title: "System Maintenance Scheduled",
-            category: "MAINTENANCE",
-            date: "Nov 24, 2025",
-            author: "By: IT Department",
-            content:
-                '<p>Our system will undergo maintenance on Saturday from 2:00 AM to 6:00 AM. Services may be temporarily unavailable during this period.</p>' +
-                '<p class="mt-4">We apologize for any inconvenience this may cause and appreciate your understanding as we work to improve our services.</p>' +
-                '<div class="bg-pink-50 border-l-4 border-primary p-4 mt-6 rounded">' +
-                '<p class="text-pink-800 font-semibold">Important Notes:</p>' +
-                '<ul class="list-disc list-inside mt-2 text-pink-700">' +
-                '<li>Emergency services will remain available</li>' +
-                '<li>All data will be securely backed up</li>' +
-                '<li>Normal operations will resume after maintenance</li>' +
-                '</ul></div>'
-        };
+    fetch('index.php?action=get_announcement&id=' + encodeURIComponent(announcementId))
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success && data.announcement) {
+                var ann = data.announcement;
+                var title = document.getElementById('modalTitle');
+                var category = document.getElementById('modalCategory');
+                var dateEl = document.getElementById('modalDate');
+                var author = document.getElementById('modalAuthor');
 
-        var title = document.getElementById('modalTitle');
-        var category = document.getElementById('modalCategory');
-        var date = document.getElementById('modalDate');
-        var author = document.getElementById('modalAuthor');
+                if (title) title.textContent = ann.title || '';
+                if (category) category.textContent = ann.category || '';
+                if (dateEl) dateEl.textContent = ann.date || '';
+                if (author) author.textContent = 'By: ' + (ann.author || 'Admin');
 
-        if (title) title.textContent = sampleData.title;
-        if (category) category.textContent = sampleData.category;
-        if (date) date.textContent = sampleData.date;
-        if (author) author.textContent = sampleData.author;
-        modalContent.innerHTML = sampleData.content;
-    }, 800);
+                // Render content (escape HTML for safety, but allow line breaks)
+                var content = ann.content || '';
+                // Convert newlines to paragraphs
+                var paragraphs = content.split('\n').filter(function(p) { return p.trim().length > 0; });
+                var html = paragraphs.map(function(p) { return '<p class="mb-3 text-gray-700">' + escapeHtmlIndex(p) + '</p>'; }).join('');
+                modalContent.innerHTML = html || '<p class="text-gray-500">No content available.</p>';
+            } else {
+                modalContent.innerHTML = '<p class="text-red-500 text-center py-4">Announcement not found.</p>';
+            }
+        })
+        .catch(function(err) {
+            console.error('Error fetching announcement:', err);
+            modalContent.innerHTML = '<p class="text-red-500 text-center py-4">Error loading announcement.</p>';
+        });
+}
+
+function escapeHtmlIndex(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
 }

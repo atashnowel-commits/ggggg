@@ -7,11 +7,51 @@
 var currentPatient = null;
 var currentPatientForVaccine = null;
 
+// ---- Utility Functions ----
+function escapeHtml(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
+function showNotification(message, type) {
+    type = type || 'success';
+    var notification = document.getElementById('notification');
+    if (!notification) return;
+    notification.textContent = message;
+    notification.className = 'notification ' + type + ' show';
+    notification.classList.remove('hidden');
+    setTimeout(function() {
+        notification.classList.remove('show');
+    }, 3000);
+}
+
+// ---- Mobile Sidebar Toggle ----
+function toggleSidebar() {
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebarOverlay');
+    if (sidebar) {
+        sidebar.classList.toggle('open');
+    }
+    if (overlay) {
+        overlay.classList.toggle('hidden');
+    }
+}
+
 // ---- Navigation ----
 function showSection(sectionName) {
     document.querySelectorAll('.section-content').forEach(function(section) {
         section.classList.add('hidden');
     });
+
+    // Close sidebar on mobile
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebarOverlay');
+    if (sidebar && sidebar.classList.contains('open')) {
+        sidebar.classList.remove('open');
+        if (overlay) overlay.classList.add('hidden');
+    }
 
     var targetSection = document.getElementById(sectionName + '-section');
     if (targetSection) {
@@ -879,4 +919,290 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         closeAllModals();
     }
+});
+
+// ============================================
+// Doctor Calendar - Schedule & Availability
+// ============================================
+var doctorCalendar = null;
+var doctorCalendarData = { unavailable_dates: [], appointments: [], working_days: [], appointment_counts: {} };
+
+function initDoctorCalendar() {
+    var container = document.getElementById('doctorCalendar');
+    if (!container || !window.DOCTOR_ID) return;
+    loadDoctorCalendarData(new Date().getMonth() + 1, new Date().getFullYear());
+}
+
+function loadDoctorCalendarData(month, year) {
+    fetch('get_availability.php?doctor_id=' + encodeURIComponent(window.DOCTOR_ID) + '&month=' + month + '&year=' + year, {
+        credentials: 'same-origin'
+    })
+    .then(function(response) { return response.text(); })
+    .then(function(text) {
+        try {
+            var data = JSON.parse(text);
+            if (data.success) {
+                doctorCalendarData = {
+                    unavailable_dates: data.unavailable_dates || [],
+                    appointments: data.appointments || [],
+                    working_days: data.working_days || [],
+                    appointment_counts: data.appointment_counts || {}
+                };
+                renderDoctorCalendar(month, year);
+            } else {
+                console.error('Doctor calendar load error:', data);
+                renderDoctorCalendar(month, year);
+            }
+        } catch (err) {
+            console.error('Invalid JSON from get_availability:', text);
+            renderDoctorCalendar(month, year);
+        }
+    })
+    .catch(function(err) {
+        console.error('Error loading doctor calendar data:', err);
+        renderDoctorCalendar(month, year);
+    });
+}
+
+function renderDoctorCalendar(month, year) {
+    var container = document.getElementById('doctorCalendar');
+    if (!container) return;
+
+    var currentDate = new Date(year, month - 1, 1);
+    var firstDay = new Date(year, month - 1, 1);
+    var lastDay = new Date(year, month, 0);
+    var prevLastDay = new Date(year, month - 1, 0);
+    var firstDayIndex = firstDay.getDay();
+    var nextDays = 7 - lastDay.getDay() - 1;
+    if (nextDays < 0) nextDays = 6;
+
+    var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    var dayNames = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+
+    var html = '<div class="calendar-container">' +
+        '<div class="calendar-header">' +
+        '<button class="calendar-nav-btn" onclick="navigateDoctorCalendar(-1,' + month + ',' + year + ')"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></button>' +
+        '<h3 class="calendar-month-year">' + months[month - 1] + ' ' + year + '</h3>' +
+        '<button class="calendar-nav-btn" onclick="navigateDoctorCalendar(1,' + month + ',' + year + ')"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg></button>' +
+        '</div>' +
+        '<div class="calendar-weekdays"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>' +
+        '<div class="calendar-days">';
+
+    // Previous month days
+    for (var x = firstDayIndex; x > 0; x--) {
+        html += '<div class="calendar-day prev-month">' + (prevLastDay.getDate() - x + 1) + '</div>';
+    }
+
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (var day = 1; day <= lastDay.getDate(); day++) {
+        var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+        var dayOfWeek = new Date(year, month - 1, day).getDay();
+        var dayName = dayNames[dayOfWeek];
+
+        var dayClass = 'calendar-day';
+        var dayData = '';
+        var isUnavailable = false;
+        var isPast = false;
+
+        var currentDay = new Date(year, month - 1, day);
+        if (currentDay < today) {
+            dayClass += ' past-date';
+            isPast = true;
+        }
+
+        if (day === today.getDate() && (month - 1) === today.getMonth() && year === today.getFullYear()) {
+            dayClass += ' today';
+        }
+
+        if (doctorCalendarData.working_days.length > 0 && doctorCalendarData.working_days.indexOf(dayName) === -1) {
+            dayClass += ' non-working-day';
+        }
+
+        var unavailable = null;
+        for (var u = 0; u < doctorCalendarData.unavailable_dates.length; u++) {
+            if (doctorCalendarData.unavailable_dates[u].date === dateStr && doctorCalendarData.unavailable_dates[u].availability_type === 'UNAVAILABLE') {
+                unavailable = doctorCalendarData.unavailable_dates[u];
+                break;
+            }
+        }
+        if (unavailable) {
+            isUnavailable = true;
+            dayClass += ' unavailable-date';
+            dayData = ' data-reason="' + escapeHtml(unavailable.reason || 'Unavailable') + '"';
+        }
+
+        var apptCount = doctorCalendarData.appointment_counts[dateStr] || 0;
+        if (apptCount > 0) {
+            dayClass += ' has-appointments';
+            dayData += ' data-appointment-count="' + apptCount + '"';
+        }
+
+        // Doctors can click any future date to toggle availability or view details
+        if (!isPast) {
+            dayClass += ' clickable';
+        }
+
+        html += '<div class="' + dayClass + '" data-date="' + dateStr + '"' + dayData + ' onclick="handleDoctorDayClick(\'' + dateStr + '\',' + isPast + ',' + isUnavailable + ')">' +
+            '<span class="day-number">' + day + '</span>' +
+            (apptCount > 0 ? '<span class="appointment-indicator">' + apptCount + '</span>' : '') +
+            (isUnavailable ? '<span class="unavailable-badge">X</span>' : '') +
+            '</div>';
+    }
+
+    for (var j = 1; j <= nextDays; j++) {
+        html += '<div class="calendar-day next-month">' + j + '</div>';
+    }
+
+    html += '</div></div>';
+    container.innerHTML = html;
+
+    // Store current month/year for navigation
+    container.dataset.month = month;
+    container.dataset.year = year;
+}
+
+function navigateDoctorCalendar(direction, currentMonth, currentYear) {
+    var newMonth = currentMonth + direction;
+    var newYear = currentYear;
+    if (newMonth < 1) { newMonth = 12; newYear--; }
+    if (newMonth > 12) { newMonth = 1; newYear++; }
+    loadDoctorCalendarData(newMonth, newYear);
+}
+
+function handleDoctorDayClick(dateStr, isPast, isUnavailable) {
+    if (isPast) return;
+
+    // Show day appointments
+    showDayAppointments(dateStr);
+
+    // If it's already unavailable, offer to remove it
+    if (isUnavailable) {
+        if (confirm('This date is marked as unavailable. Do you want to make it available again?')) {
+            toggleDoctorAvailability(dateStr, false);
+        }
+    } else {
+        // Fill the unavailability form date
+        var dateInput = document.getElementById('unavailableDate');
+        if (dateInput) dateInput.value = dateStr;
+    }
+}
+
+function showDayAppointments(dateStr) {
+    var titleEl = document.getElementById('selectedDateTitle');
+    var container = document.getElementById('calendarDayAppointments');
+    if (!container) return;
+
+    var dateObj = new Date(dateStr + 'T00:00:00');
+    var options = { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' };
+    if (titleEl) titleEl.textContent = dateObj.toLocaleDateString('en-US', options);
+
+    var dayAppointments = (doctorCalendarData.appointments || []).filter(function(a) {
+        return a.appointment_date === dateStr;
+    });
+
+    if (dayAppointments.length === 0) {
+        container.innerHTML =
+            '<div class="text-center py-6">' +
+            '<i class="fas fa-calendar-check text-gray-300 text-3xl mb-3"></i>' +
+            '<p class="text-gray-500 text-sm">No appointments on this day</p>' +
+            '</div>';
+        return;
+    }
+
+    var html = '';
+    dayAppointments.forEach(function(appt) {
+        var time = appt.appointment_time ? appt.appointment_time.substring(0, 5) : '';
+        var patientName = (appt.patient_first_name || '') + ' ' + (appt.patient_last_name || '');
+        var statusClass = '';
+        switch ((appt.status || '').toUpperCase()) {
+            case 'CONFIRMED': statusClass = 'bg-green-100 text-green-800'; break;
+            case 'SCHEDULED': statusClass = 'bg-orange-100 text-orange-800'; break;
+            case 'COMPLETED': statusClass = 'bg-blue-100 text-blue-800'; break;
+            default: statusClass = 'bg-gray-100 text-gray-800';
+        }
+
+        html +=
+            '<div class="p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">' +
+            '<div class="flex justify-between items-start">' +
+            '<div><div class="font-medium text-gray-800 text-sm">' + escapeHtml(patientName) + '</div>' +
+            '<div class="text-xs text-gray-500"><i class="far fa-clock mr-1"></i>' + escapeHtml(time) + '</div></div>' +
+            '<span class="px-2 py-0.5 text-xs font-medium rounded-full ' + statusClass + '">' + escapeHtml(appt.status || '') + '</span>' +
+            '</div>' +
+            '<div class="text-xs text-gray-500 mt-1">' + escapeHtml(appt.type || 'Consultation') + '</div>' +
+            '</div>';
+    });
+    container.innerHTML = html;
+}
+
+function toggleDoctorAvailability(dateStr, markUnavailable, reason) {
+    var formData = new FormData();
+    formData.append('csrf_token', window.CSRF_TOKEN || '');
+    formData.append('date', dateStr);
+
+    if (markUnavailable) {
+        formData.append('action', 'set_unavailable');
+        formData.append('reason', reason || '');
+        formData.append('is_all_day', '1');
+    } else {
+        formData.append('action', 'remove_unavailable');
+    }
+
+    fetch('manage_availability.php', { method: 'POST', body: formData, credentials: 'same-origin' })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showNotification(data.message, 'success');
+                // Reload calendar data
+                var container = document.getElementById('doctorCalendar');
+                var m = container ? parseInt(container.dataset.month) : (new Date().getMonth() + 1);
+                var y = container ? parseInt(container.dataset.year) : new Date().getFullYear();
+                loadDoctorCalendarData(m, y);
+            } else {
+                showNotification(data.message || 'Error updating availability', 'error');
+            }
+        })
+        .catch(function(err) {
+            showNotification('Failed to update availability', 'error');
+            console.error('Error:', err);
+        });
+}
+
+// Handle Set Unavailable form submission
+document.addEventListener('DOMContentLoaded', function() {
+    var form = document.getElementById('setUnavailableForm');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var dateInput = document.getElementById('unavailableDate');
+            var reasonInput = document.getElementById('unavailableReason');
+            if (!dateInput || !dateInput.value) {
+                showNotification('Please select a date', 'error');
+                return;
+            }
+            toggleDoctorAvailability(dateInput.value, true, reasonInput ? reasonInput.value : '');
+            if (reasonInput) reasonInput.value = '';
+        });
+    }
+});
+
+// Initialize doctor calendar when schedule section is shown
+var origShowSection = window.showSection;
+window.showSection = function(sectionName) {
+    origShowSection(sectionName);
+    if (sectionName === 'schedule' && !doctorCalendar) {
+        doctorCalendar = true;
+        initDoctorCalendar();
+    }
+};
+
+// Also init on load if schedule is the default section
+document.addEventListener('DOMContentLoaded', function() {
+    // Pre-initialize after a small delay so charts init first
+    setTimeout(function() {
+        if (document.getElementById('doctorCalendar')) {
+            initDoctorCalendar();
+        }
+    }, 500);
 });

@@ -3,11 +3,27 @@
    Handles section nav, modals, notifications
    ============================================ */
 
+// ---- Mobile Sidebar Toggle ----
+function toggleAdminSidebar() {
+    var sidebar = document.getElementById('adminSidebar');
+    var overlay = document.getElementById('adminSidebarOverlay');
+    if (sidebar) sidebar.classList.toggle('open');
+    if (overlay) overlay.classList.toggle('hidden');
+}
+
 // ---- Section Navigation ----
 function showSection(sectionName) {
     document.querySelectorAll('.section-content').forEach(function(section) {
         section.classList.add('hidden');
     });
+
+    // Close sidebar on mobile
+    var sidebar = document.getElementById('adminSidebar');
+    var overlay = document.getElementById('adminSidebarOverlay');
+    if (sidebar && sidebar.classList.contains('open')) {
+        sidebar.classList.remove('open');
+        if (overlay) overlay.classList.add('hidden');
+    }
 
     var targetSection = document.getElementById(sectionName + '-section');
     if (targetSection) {

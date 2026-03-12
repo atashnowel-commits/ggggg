@@ -151,6 +151,40 @@ function get_all_appointments($conn) {
     return $appointments;
 }
 
+function get_announcements($conn) {
+    $announcements = [];
+    $query = "SELECT a.*, u.first_name, u.last_name
+              FROM announcements a
+              LEFT JOIN users u ON a.created_by = u.id
+              ORDER BY a.created_at DESC";
+    $result = mysqli_query($conn, $query);
+    if ($result) {
+        while ($row = mysqli_fetch_assoc($result)) {
+            $announcements[] = $row;
+        }
+    }
+    return $announcements;
+}
+
+function get_all_appointments_for_calendar($conn) {
+    $appointments = [];
+    $query = "SELECT a.id, a.appointment_date, a.appointment_time, a.status, a.type, a.duration,
+              p.first_name as patient_first_name, p.last_name as patient_last_name,
+              d.first_name as doctor_first_name, d.last_name as doctor_last_name
+              FROM appointments a
+              JOIN patients p ON a.patient_id = p.id
+              JOIN users d ON a.doctor_id = d.id
+              WHERE a.status NOT IN ('CANCELLED','NO_SHOW')
+              ORDER BY a.appointment_date ASC, a.appointment_time ASC";
+    $result = mysqli_query($conn, $query);
+    if ($result) {
+        while ($row = mysqli_fetch_assoc($result)) {
+            $appointments[] = $row;
+        }
+    }
+    return $appointments;
+}
+
 function get_clinic_settings($conn) {
     $settings = [];
     $query = "SELECT * FROM clinic_settings";
@@ -212,6 +246,8 @@ $services = get_all_services($conn);
 $appointments = get_all_appointments($conn);
 $clinic_settings = get_clinic_settings($conn);
 $activity_logs = get_activity_logs($conn);
+$admin_announcements = get_announcements($conn);
+$calendar_appointments = get_all_appointments_for_calendar($conn);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -223,6 +259,7 @@ $activity_logs = get_activity_logs($conn);
     <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600&display=swap" rel="stylesheet">
     <link href="css/shared.css" rel="stylesheet">
+    <link href="css/dashboard.css" rel="stylesheet">
     <link href="css/admin.css" rel="stylesheet">
     <style>
         :root { --primary-pink: #FF6B9A; --light-pink: #FFBCD9; --dark-text: #333333; --light-gray: #F6F6F8; }
@@ -272,12 +309,19 @@ $activity_logs = get_activity_logs($conn);
     </style>
 </head>
 <body>
+    <!-- Mobile Menu Button -->
+    <button onclick="toggleAdminSidebar()" class="mobile-menu-btn fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg text-gray-700 hover:text-pink-500 transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <!-- Mobile Overlay -->
+    <div id="adminSidebarOverlay" class="fixed inset-0 bg-black/40 z-30 hidden" onclick="toggleAdminSidebar()"></div>
+
     <!-- Notification Container -->
     <div id="notification" class="notification hidden"></div>
 
     <div class="flex min-h-screen">
         <!-- Sidebar -->
-        <div class="sidebar w-64 text-white">
+        <div id="adminSidebar" class="sidebar w-64 text-white">
             <div class="p-6">
                 <h1 class="text-2xl font-inter font-bold mb-8">AlagApp</h1>
                 
@@ -322,8 +366,17 @@ $activity_logs = get_activity_logs($conn);
                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" clip-rule="evenodd"></path></svg>
                         <span>All Appointments</span>
                     </a>
-                    
-                    
+
+                    <a href="#calendar" onclick="showSection('calendar')" class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-white/20 transition-colors">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path></svg>
+                        <span>Calendar</span>
+                    </a>
+
+                    <a href="#announcements" onclick="showSection('announcements')" class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-white/20 transition-colors">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 3a1 1 0 00-1.447-.894L8.763 6H5a3 3 0 000 6h.28l1.771 5.316A1 1 0 008 18h1a1 1 0 00.948-.684l1.581-4.737.914.457A1 1 0 0013 13V7a1 1 0 00-.553-.894L17 3.618V13a1 1 0 102 0V3z" clip-rule="evenodd"></path></svg>
+                        <span>Announcements</span>
+                    </a>
+
                     <a href="#settings" onclick="showSection('settings')" class="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-white/20 transition-colors">
                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path></svg>
                         <span>System Settings</span>
@@ -347,7 +400,7 @@ $activity_logs = get_activity_logs($conn);
         </div>
         
         <!-- Main Content -->
-        <div class="flex-1 overflow-auto">
+        <div class="main-content flex-1 overflow-auto">
             <!-- Dashboard Section -->
             <div id="dashboard-section" class="section-content p-8">
                 <div class="mb-8">
@@ -674,7 +727,152 @@ $activity_logs = get_activity_logs($conn);
                 </div>
             </div>
             
-            
+
+            <!-- Admin Calendar Section -->
+            <div id="calendar-section" class="section-content p-4 md:p-8 hidden">
+                <div class="mb-8">
+                    <h1 class="text-2xl md:text-3xl font-inter font-bold text-gray-800 mb-2">Appointment Calendar</h1>
+                    <p class="text-gray-600 text-sm md:text-base">View all clinic appointments in a calendar view</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+                    <div class="lg:col-span-2">
+                        <div class="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                            <div id="adminCalendar"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-6">
+                            <h3 class="text-lg font-inter font-semibold text-gray-800 mb-4">
+                                <span id="adminCalendarDateTitle">Select a Date</span>
+                            </h3>
+                            <div id="adminCalendarDayAppointments" class="space-y-3 max-h-96 overflow-y-auto">
+                                <div class="text-center py-8">
+                                    <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                    <p class="text-gray-500 text-sm">Click a date to see appointments</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                            <h3 class="text-lg font-inter font-semibold text-gray-800 mb-4">Legend</h3>
+                            <div class="space-y-3">
+                                <div class="flex items-center"><div class="w-6 h-6 rounded bg-pink-50 border-2 border-pink-300 mr-3"></div><span class="text-sm text-gray-600">Today</span></div>
+                                <div class="flex items-center"><div class="w-6 h-6 rounded bg-white border border-gray-200 mr-3 relative"><span class="absolute -top-1 -right-1 w-3 h-3 bg-pink-500 rounded-full"></span></div><span class="text-sm text-gray-600">Has Appointments</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Announcements Section -->
+            <div id="announcements-section" class="section-content p-4 md:p-8 hidden">
+                <div class="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                        <h1 class="text-2xl md:text-3xl font-inter font-bold text-gray-800 mb-2">Announcements</h1>
+                        <p class="text-gray-600 text-sm md:text-base">Manage clinic announcements visible on the landing page</p>
+                    </div>
+                    <button onclick="openAnnouncementFormModal()" class="btn-primary text-white px-4 md:px-6 py-2 md:py-3 rounded-lg font-semibold text-sm md:text-base">
+                        + New Announcement
+                    </button>
+                </div>
+
+                <!-- Announcements List -->
+                <div class="bg-white rounded-xl shadow-lg p-4 md:p-6">
+                    <div class="space-y-4">
+                        <?php if (empty($admin_announcements)): ?>
+                            <div class="text-center py-12">
+                                <svg class="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+                                <p class="text-gray-500 text-lg">No announcements yet</p>
+                                <p class="text-gray-400 text-sm mt-1">Create your first announcement to display on the landing page</p>
+                            </div>
+                        <?php else: ?>
+                            <?php foreach ($admin_announcements as $ann): ?>
+                                <div class="border border-gray-200 rounded-lg p-4 md:p-6 hover:bg-gray-50 transition-colors">
+                                    <div class="flex flex-col sm:flex-row justify-between items-start gap-3">
+                                        <div class="flex-1">
+                                            <div class="flex flex-wrap items-center gap-2 mb-2">
+                                                <h3 class="text-lg font-semibold text-gray-800"><?php echo htmlspecialchars($ann['title']); ?></h3>
+                                                <span class="px-2 py-0.5 text-xs font-medium rounded-full <?php
+                                                    echo $ann['is_active'] ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600';
+                                                ?>"><?php echo $ann['is_active'] ? 'Active' : 'Inactive'; ?></span>
+                                                <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-800"><?php echo htmlspecialchars($ann['category']); ?></span>
+                                                <?php if ($ann['priority'] === 'HIGH' || $ann['priority'] === 'URGENT'): ?>
+                                                    <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-800"><?php echo htmlspecialchars($ann['priority']); ?></span>
+                                                <?php endif; ?>
+                                            </div>
+                                            <p class="text-gray-600 text-sm line-clamp-2"><?php echo htmlspecialchars(substr(strip_tags($ann['content']), 0, 200)); ?></p>
+                                            <div class="text-xs text-gray-400 mt-2">
+                                                By <?php echo htmlspecialchars(($ann['first_name'] ?? '') . ' ' . ($ann['last_name'] ?? '')); ?>
+                                                &bull; <?php echo date('M j, Y g:i A', strtotime($ann['created_at'])); ?>
+                                            </div>
+                                        </div>
+                                        <div class="flex space-x-2">
+                                            <button onclick="toggleAnnouncementStatus(<?php echo $ann['id']; ?>, <?php echo $ann['is_active'] ? '0' : '1'; ?>)"
+                                                    class="px-3 py-1.5 text-xs font-medium rounded-lg <?php echo $ann['is_active'] ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'; ?> transition-colors">
+                                                <?php echo $ann['is_active'] ? 'Deactivate' : 'Activate'; ?>
+                                            </button>
+                                            <button onclick="deleteAnnouncement(<?php echo $ann['id']; ?>)"
+                                                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors">
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add Announcement Modal -->
+            <div id="addAnnouncementModal" class="fixed inset-0 modal-backdrop hidden z-50 flex items-center justify-center p-4">
+                <div class="bg-white rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+                    <div class="p-6 border-b border-gray-200">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-xl font-semibold text-gray-800">New Announcement</h3>
+                            <button onclick="closeAnnouncementFormModal()" class="text-gray-400 hover:text-gray-600">&times;</button>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <form id="addAnnouncementForm" onsubmit="handleAddAnnouncement(event)">
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                                <input type="text" id="annTitle" required maxlength="200" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-300 focus:border-transparent text-sm" placeholder="Announcement title...">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Content</label>
+                                <textarea id="annContent" required rows="5" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-300 focus:border-transparent text-sm" placeholder="Write your announcement..."></textarea>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                                    <select id="annCategory" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-300 text-sm">
+                                        <option value="GENERAL">General</option>
+                                        <option value="MAINTENANCE">Maintenance</option>
+                                        <option value="HEALTH_ADVISORY">Health Advisory</option>
+                                        <option value="EVENT">Event</option>
+                                        <option value="PROMOTION">Promotion</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                                    <select id="annPriority" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-300 text-sm">
+                                        <option value="LOW">Low</option>
+                                        <option value="NORMAL" selected>Normal</option>
+                                        <option value="HIGH">High</option>
+                                        <option value="URGENT">Urgent</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="flex justify-end space-x-3">
+                                <button type="button" onclick="closeAnnouncementFormModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300">Cancel</button>
+                                <button type="submit" class="px-4 py-2 text-sm font-medium text-white rounded-lg btn-primary">Publish Announcement</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
             <!-- System Settings Section -->
             <div id="settings-section" class="section-content p-8 hidden">
                 <div class="mb-8">
@@ -1129,6 +1327,219 @@ $activity_logs = get_activity_logs($conn);
         })
         .catch(function(error) { console.error('Error:', error); showNotification('Error updating settings', 'error'); });
     }
+
+    // ============================================
+    // Admin Calendar
+    // ============================================
+    var adminCalendarAppointments = <?php echo json_encode($calendar_appointments); ?>;
+    var adminCalCurrentMonth = new Date().getMonth() + 1;
+    var adminCalCurrentYear = new Date().getFullYear();
+
+    function initAdminCalendar() {
+        renderAdminCalendar(adminCalCurrentMonth, adminCalCurrentYear);
+    }
+
+    function renderAdminCalendar(month, year) {
+        var container = document.getElementById('adminCalendar');
+        if (!container) return;
+
+        adminCalCurrentMonth = month;
+        adminCalCurrentYear = year;
+
+        var firstDay = new Date(year, month - 1, 1);
+        var lastDay = new Date(year, month, 0);
+        var prevLastDay = new Date(year, month - 1, 0);
+        var firstDayIndex = firstDay.getDay();
+        var nextDays = 7 - lastDay.getDay() - 1;
+        if (nextDays < 0) nextDays = 6;
+
+        var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+        // Count appointments per date
+        var apptCounts = {};
+        adminCalendarAppointments.forEach(function(a) {
+            if (!apptCounts[a.appointment_date]) apptCounts[a.appointment_date] = 0;
+            apptCounts[a.appointment_date]++;
+        });
+
+        var html = '<div class="calendar-container">' +
+            '<div class="calendar-header">' +
+            '<button class="calendar-nav-btn" onclick="navigateAdminCalendar(-1)"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></button>' +
+            '<h3 class="calendar-month-year">' + months[month - 1] + ' ' + year + '</h3>' +
+            '<button class="calendar-nav-btn" onclick="navigateAdminCalendar(1)"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg></button>' +
+            '</div>' +
+            '<div class="calendar-weekdays"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>' +
+            '<div class="calendar-days">';
+
+        var today = new Date();
+        today.setHours(0,0,0,0);
+
+        for (var x = firstDayIndex; x > 0; x--) {
+            html += '<div class="calendar-day prev-month">' + (prevLastDay.getDate() - x + 1) + '</div>';
+        }
+
+        for (var day = 1; day <= lastDay.getDate(); day++) {
+            var dateStr = year + '-' + String(month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+            var dayClass = 'calendar-day clickable';
+            var currentDay = new Date(year, month - 1, day);
+
+            if (day === today.getDate() && (month - 1) === today.getMonth() && year === today.getFullYear()) {
+                dayClass += ' today';
+            }
+            if (currentDay < today) {
+                dayClass += ' past-date';
+            }
+
+            var count = apptCounts[dateStr] || 0;
+            if (count > 0) dayClass += ' has-appointments';
+
+            html += '<div class="' + dayClass + '" data-date="' + dateStr + '" onclick="showAdminDayAppointments(\'' + dateStr + '\')">' +
+                '<span class="day-number">' + day + '</span>' +
+                (count > 0 ? '<span class="appointment-indicator">' + count + '</span>' : '') +
+                '</div>';
+        }
+
+        for (var j = 1; j <= nextDays; j++) {
+            html += '<div class="calendar-day next-month">' + j + '</div>';
+        }
+
+        html += '</div></div>';
+        container.innerHTML = html;
+    }
+
+    function navigateAdminCalendar(direction) {
+        var newMonth = adminCalCurrentMonth + direction;
+        var newYear = adminCalCurrentYear;
+        if (newMonth < 1) { newMonth = 12; newYear--; }
+        if (newMonth > 12) { newMonth = 1; newYear++; }
+        renderAdminCalendar(newMonth, newYear);
+    }
+
+    function showAdminDayAppointments(dateStr) {
+        var titleEl = document.getElementById('adminCalendarDateTitle');
+        var container = document.getElementById('adminCalendarDayAppointments');
+        if (!container) return;
+
+        var dateObj = new Date(dateStr + 'T00:00:00');
+        var options = { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' };
+        if (titleEl) titleEl.textContent = dateObj.toLocaleDateString('en-US', options);
+
+        var dayAppts = adminCalendarAppointments.filter(function(a) { return a.appointment_date === dateStr; });
+
+        if (dayAppts.length === 0) {
+            container.innerHTML = '<div class="text-center py-6"><svg class="w-10 h-10 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg><p class="text-gray-500 text-sm">No appointments</p></div>';
+            return;
+        }
+
+        var html = '';
+        dayAppts.forEach(function(appt) {
+            var time = appt.appointment_time ? appt.appointment_time.substring(0,5) : '';
+            var patient = (appt.patient_first_name || '') + ' ' + (appt.patient_last_name || '');
+            var doctor = 'Dr. ' + (appt.doctor_first_name || '') + ' ' + (appt.doctor_last_name || '');
+            var statusClass = 'bg-gray-100 text-gray-800';
+            switch ((appt.status || '').toUpperCase()) {
+                case 'CONFIRMED': statusClass = 'bg-green-100 text-green-800'; break;
+                case 'SCHEDULED': statusClass = 'bg-orange-100 text-orange-800'; break;
+                case 'COMPLETED': statusClass = 'bg-blue-100 text-blue-800'; break;
+                case 'IN_PROGRESS': statusClass = 'bg-yellow-100 text-yellow-800'; break;
+            }
+            html += '<div class="p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">' +
+                '<div class="flex justify-between items-start">' +
+                '<div><div class="font-medium text-gray-800 text-sm">' + escapeHtml(patient) + '</div>' +
+                '<div class="text-xs text-gray-500">' + escapeHtml(doctor) + '</div>' +
+                '<div class="text-xs text-gray-500 mt-0.5"><svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' + escapeHtml(time) + '</div></div>' +
+                '<span class="px-2 py-0.5 text-xs font-medium rounded-full ' + statusClass + '">' + escapeHtml(appt.status || '') + '</span>' +
+                '</div></div>';
+        });
+        container.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    // Init admin calendar when its section is shown
+    var origAdminShowSection = window.showSection;
+    var adminCalendarInitialized = false;
+    window.showSection = function(sectionName) {
+        origAdminShowSection(sectionName);
+        if (sectionName === 'calendar' && !adminCalendarInitialized) {
+            adminCalendarInitialized = true;
+            initAdminCalendar();
+        }
+    };
+
+    // ============================================
+    // Announcements Management
+    // ============================================
+    function openAnnouncementFormModal() {
+        document.getElementById('addAnnouncementModal').classList.remove('hidden');
+    }
+
+    function closeAnnouncementFormModal() {
+        document.getElementById('addAnnouncementModal').classList.add('hidden');
+        document.getElementById('addAnnouncementForm').reset();
+    }
+
+    function handleAddAnnouncement(event) {
+        event.preventDefault();
+        var formData = new FormData();
+        formData.append('action', 'add_announcement');
+        formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
+        formData.append('title', document.getElementById('annTitle').value);
+        formData.append('content', document.getElementById('annContent').value);
+        formData.append('category', document.getElementById('annCategory').value);
+        formData.append('priority', document.getElementById('annPriority').value);
+
+        fetch('admin-actions-secure.php', { method: 'POST', body: formData })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showNotification('Announcement published!');
+                closeAnnouncementFormModal();
+                setTimeout(function() { location.reload(); }, 1000);
+            } else {
+                showNotification(data.message || 'Error adding announcement', 'error');
+            }
+        })
+        .catch(function(error) { console.error('Error:', error); showNotification('Error adding announcement', 'error'); });
+    }
+
+    function toggleAnnouncementStatus(announcementId, newStatus) {
+        var formData = new FormData();
+        formData.append('action', 'toggle_announcement');
+        formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
+        formData.append('announcement_id', announcementId);
+        formData.append('is_active', newStatus);
+
+        fetch('admin-actions-secure.php', { method: 'POST', body: formData })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) { showNotification('Announcement updated!'); setTimeout(function() { location.reload(); }, 1000); }
+            else { showNotification(data.message || 'Error', 'error'); }
+        })
+        .catch(function(error) { showNotification('Error updating announcement', 'error'); });
+    }
+
+    function deleteAnnouncement(announcementId) {
+        if (!confirm('Delete this announcement? This cannot be undone.')) return;
+        var formData = new FormData();
+        formData.append('action', 'delete_announcement');
+        formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
+        formData.append('announcement_id', announcementId);
+
+        fetch('admin-actions-secure.php', { method: 'POST', body: formData })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.success) { showNotification('Announcement deleted!'); setTimeout(function() { location.reload(); }, 1000); }
+            else { showNotification(data.message || 'Error', 'error'); }
+        })
+        .catch(function(error) { showNotification('Error deleting announcement', 'error'); });
+    }
     </script>
+    <script src="js/admin-dashboard.js"></script>
 </body>
 </html>
