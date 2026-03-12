@@ -389,3 +389,84 @@
     border-top-color: var(--primary-pink-dashboard, #FF6B9A);
     animation: spin 1s ease-in-out infinite;
 }
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ============================================
+   Additional Responsive Styles
+   ============================================ */
+
+/* Calendar responsive */
+@media (max-width: 480px) {
+    .calendar-container {
+        padding: 0.5rem;
+    }
+
+    .calendar-day {
+        font-size: 0.7rem;
+        border-radius: 4px;
+    }
+
+    .calendar-weekdays {
+        font-size: 0.6rem;
+    }
+
+    .calendar-month-year {
+        font-size: 0.95rem;
+    }
+
+    .appointment-indicator {
+        width: 12px;
+        height: 12px;
+        font-size: 0.5rem;
+        top: 1px;
+        right: 1px;
+    }
+
+    .unavailable-badge {
+        font-size: 0.5rem;
+    }
+}
+
+/* Responsive sections padding */
+@media (max-width: 640px) {
+    .section-content {
+        padding: 1rem !important;
+    }
+
+    .section-content h1 {
+        font-size: 1.5rem !important;
+    }
+}
+
+/* Admin dashboard responsive overrides */
+@media (max-width: 768px) {
+    .flex.min-h-screen > .flex-1 {
+        width: 100%;
+    }
+
+    /* Make tables scroll horizontally */
+    table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+}
+
+/* Line clamp utility */
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}

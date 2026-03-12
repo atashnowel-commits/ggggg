@@ -52,6 +52,15 @@ try {
         case 'get_doctors':
             handleGetDoctors($conn);
             break;
+        case 'add_announcement':
+            handleAddAnnouncement($conn);
+            break;
+        case 'toggle_announcement':
+            handleToggleAnnouncement($conn);
+            break;
+        case 'delete_announcement':
+            handleDeleteAnnouncement($conn);
+            break;
         default:
             echo json_encode(['success' => false, 'message' => 'Unknown action: ' . $action]);
             exit;
@@ -532,11 +541,133 @@ function handleExportPatientData($conn) {
 
 function handleGetDoctors($conn) {
     $doctors = get_all_doctors($conn);
-    
+
     if (!empty($doctors)) {
         echo json_encode(['success' => true, 'doctors' => $doctors]);
     } else {
         echo json_encode(['success' => false, 'message' => 'No doctors found']);
+    }
+}
+
+function handleAddAnnouncement($conn) {
+    $required = ['title', 'content'];
+    foreach ($required as $field) {
+        if (empty($_POST[$field])) {
+            echo json_encode(['success' => false, 'message' => "Missing required field: $field"]);
+            return;
+        }
+    }
+
+    $title = sanitize_input($_POST['title']);
+    $content = $_POST['content']; // Allow HTML content
+    $category = sanitize_input($_POST['category'] ?? 'GENERAL');
+    $priority = sanitize_input($_POST['priority'] ?? 'NORMAL');
+    $created_by = $_SESSION['user_id'];
+
+    // Validate category
+    $allowed_categories = ['GENERAL', 'MAINTENANCE', 'HEALTH_ADVISORY', 'EVENT', 'PROMOTION'];
+    if (!in_array($category, $allowed_categories)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid category']);
+        return;
+    }
+
+    // Validate priority
+    $allowed_priorities = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
+    if (!in_array($priority, $allowed_priorities)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid priority']);
+        return;
+    }
+
+    if (strlen($title) > 200) {
+        echo json_encode(['success' => false, 'message' => 'Title too long (max 200 characters)']);
+        return;
+    }
+
+    $query = "INSERT INTO announcements (title, content, category, priority, is_active, published_at, created_by)
+              VALUES (?, ?, ?, ?, 1, NOW(), ?)";
+    $stmt = mysqli_prepare($conn, $query);
+    mysqli_stmt_bind_param($stmt, "ssssi", $title, $content, $category, $priority, $created_by);
+
+    if (mysqli_stmt_execute($stmt)) {
+        // Log activity
+        $details = "Created announcement: $title";
+        $ip_address = $_SERVER['REMOTE_ADDR'];
+        $log_query = "INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, 'CREATE', ?, ?)";
+        $log_stmt = mysqli_prepare($conn, $log_query);
+        mysqli_stmt_bind_param($log_stmt, "iss", $created_by, $details, $ip_address);
+        mysqli_stmt_execute($log_stmt);
+
+        echo json_encode(['success' => true, 'message' => 'Announcement published successfully']);
+    } else {
+        error_log("Announcement add error: " . mysqli_error($conn));
+        echo json_encode(['success' => false, 'message' => 'Failed to create announcement']);
+    }
+}
+
+function handleToggleAnnouncement($conn) {
+    if (!isset($_POST['announcement_id'])) {
+        echo json_encode(['success' => false, 'message' => 'Missing announcement ID']);
+        return;
+    }
+
+    $announcement_id = intval($_POST['announcement_id']);
+    $is_active = intval($_POST['is_active'] ?? 0);
+
+    $query = "UPDATE announcements SET is_active = ?, updated_at = NOW() WHERE id = ?";
+    $stmt = mysqli_prepare($conn, $query);
+    mysqli_stmt_bind_param($stmt, "ii", $is_active, $announcement_id);
+
+    if (mysqli_stmt_execute($stmt)) {
+        $status_text = $is_active ? 'activated' : 'deactivated';
+        // Log activity
+        $user_id = $_SESSION['user_id'];
+        $details = "Announcement $status_text (ID: $announcement_id)";
+        $ip_address = $_SERVER['REMOTE_ADDR'];
+        $log_query = "INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, 'UPDATE', ?, ?)";
+        $log_stmt = mysqli_prepare($conn, $log_query);
+        mysqli_stmt_bind_param($log_stmt, "iss", $user_id, $details, $ip_address);
+        mysqli_stmt_execute($log_stmt);
+
+        echo json_encode(['success' => true, 'message' => "Announcement $status_text"]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to update announcement']);
+    }
+}
+
+function handleDeleteAnnouncement($conn) {
+    if (!isset($_POST['announcement_id'])) {
+        echo json_encode(['success' => false, 'message' => 'Missing announcement ID']);
+        return;
+    }
+
+    $announcement_id = intval($_POST['announcement_id']);
+
+    // Get title for logging
+    $check_query = "SELECT title FROM announcements WHERE id = ?";
+    $check_stmt = mysqli_prepare($conn, $check_query);
+    mysqli_stmt_bind_param($check_stmt, "i", $announcement_id);
+    mysqli_stmt_execute($check_stmt);
+    $result = mysqli_stmt_get_result($check_stmt);
+    $announcement = mysqli_fetch_assoc($result);
+
+    $delete_query = "DELETE FROM announcements WHERE id = ?";
+    $stmt = mysqli_prepare($conn, $delete_query);
+    mysqli_stmt_bind_param($stmt, "i", $announcement_id);
+
+    if (mysqli_stmt_execute($stmt)) {
+        // Log activity
+        $user_id = $_SESSION['user_id'];
+        $title = $announcement ? $announcement['title'] : 'Unknown';
+        $details = "Deleted announcement: $title (ID: $announcement_id)";
+        $ip_address = $_SERVER['REMOTE_ADDR'];
+        $log_query = "INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, 'DELETE', ?, ?)";
+        $log_stmt = mysqli_prepare($conn, $log_query);
+        mysqli_stmt_bind_param($log_stmt, "iss", $user_id, $details, $ip_address);
+        mysqli_stmt_execute($log_stmt);
+
+        echo json_encode(['success' => true, 'message' => 'Announcement deleted']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to delete announcement']);
     }
 }
 ?>

@@ -464,3 +464,47 @@ CREATE TABLE IF NOT EXISTS `login_history` (
     CONSTRAINT `fk_login_user` FOREIGN KEY (`user_id`)
         REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 19. DOCTOR SCHEDULES (Recurring weekly schedules)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `doctor_schedules` (
+    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `doctor_id` INT UNSIGNED NOT NULL,
+    `day_of_week` ENUM('MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY') NOT NULL,
+    `start_time` TIME NOT NULL,
+    `end_time` TIME NOT NULL,
+    `slot_duration` INT UNSIGNED NOT NULL DEFAULT 30 COMMENT 'in minutes',
+    `max_patients` INT UNSIGNED NOT NULL DEFAULT 10,
+    `active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    INDEX `idx_schedules_doctor` (`doctor_id`),
+    INDEX `idx_schedules_day` (`day_of_week`),
+    CONSTRAINT `fk_schedules_doctor` FOREIGN KEY (`doctor_id`)
+        REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- 20. ANNOUNCEMENTS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `announcements` (
+    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `title` VARCHAR(200) NOT NULL,
+    `content` TEXT NOT NULL,
+    `category` ENUM('GENERAL','MAINTENANCE','HEALTH_ADVISORY','EVENT','PROMOTION') NOT NULL DEFAULT 'GENERAL',
+    `priority` ENUM('LOW','NORMAL','HIGH','URGENT') NOT NULL DEFAULT 'NORMAL',
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `published_at` TIMESTAMP NULL DEFAULT NULL,
+    `expires_at` TIMESTAMP NULL DEFAULT NULL,
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    INDEX `idx_announcements_active` (`is_active`),
+    INDEX `idx_announcements_published` (`published_at`),
+    INDEX `idx_announcements_category` (`category`),
+    CONSTRAINT `fk_announcements_creator` FOREIGN KEY (`created_by`)
+        REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

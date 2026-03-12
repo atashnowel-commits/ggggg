@@ -949,34 +949,39 @@ function recordVaccination($conn, $data, $doctor_id) {
 
 function setAvailability($conn, $data, $doctor_id) {
     $date = $data['date'];
-    $start_time = $data['start_time'];
-    $end_time = $data['end_time'];
-    
-    if (!strtotime($date) || !strtotime($start_time) || !strtotime($end_time)) {
-        return ['success' => false, 'message' => 'Invalid date or time format'];
+    $start_time = $data['start_time'] ?? '00:00:00';
+    $end_time = $data['end_time'] ?? '23:59:59';
+    $availability_type = $data['availability_type'] ?? 'AVAILABLE';
+    $reason = $data['reason'] ?? '';
+    $is_all_day = isset($data['is_all_day']) ? 1 : 0;
+
+    if (!strtotime($date)) {
+        return ['success' => false, 'message' => 'Invalid date format'];
     }
-    
-    if (strtotime($start_time) >= strtotime($end_time)) {
-        return ['success' => false, 'message' => 'End time must be after start time'];
+
+    if (!$is_all_day && $start_time && $end_time) {
+        if (strtotime($start_time) >= strtotime($end_time)) {
+            return ['success' => false, 'message' => 'End time must be after start time'];
+        }
     }
-    
-    $check_query = "SELECT id FROM doctor_availability WHERE doctor_id = ? AND date = ?";
+
+    $check_query = "SELECT id FROM doctor_availability WHERE doctor_id = ? AND specific_date = ? AND availability_type = ?";
     $check_stmt = mysqli_prepare($conn, $check_query);
-    mysqli_stmt_bind_param($check_stmt, "is", $doctor_id, $date);
+    mysqli_stmt_bind_param($check_stmt, "iss", $doctor_id, $date, $availability_type);
     mysqli_stmt_execute($check_stmt);
     $result = mysqli_stmt_get_result($check_stmt);
-    
+
     if (mysqli_num_rows($result) > 0) {
-        $query = "UPDATE doctor_availability SET start_time = ?, end_time = ?, updated_at = NOW() WHERE doctor_id = ? AND date = ?";
+        $query = "UPDATE doctor_availability SET start_time = ?, end_time = ?, reason = ?, is_all_day = ?, updated_at = NOW() WHERE doctor_id = ? AND specific_date = ? AND availability_type = ?";
         $stmt = mysqli_prepare($conn, $query);
-        mysqli_stmt_bind_param($stmt, "ssis", $start_time, $end_time, $doctor_id, $date);
+        mysqli_stmt_bind_param($stmt, "sssiiss", $start_time, $end_time, $reason, $is_all_day, $doctor_id, $date, $availability_type);
     } else {
-        $query = "INSERT INTO doctor_availability (doctor_id, date, start_time, end_time, created_at) 
-                  VALUES (?, ?, ?, ?, NOW())";
+        $query = "INSERT INTO doctor_availability (doctor_id, specific_date, start_time, end_time, availability_type, reason, is_all_day, active)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, 1)";
         $stmt = mysqli_prepare($conn, $query);
-        mysqli_stmt_bind_param($stmt, "isss", $doctor_id, $date, $start_time, $end_time);
+        mysqli_stmt_bind_param($stmt, "isssssi", $doctor_id, $date, $start_time, $end_time, $availability_type, $reason, $is_all_day);
     }
-    
+
     if (mysqli_stmt_execute($stmt)) {
         return ['success' => true, 'message' => 'Availability set successfully'];
     }
@@ -1134,37 +1139,17 @@ function get_doctor_availability($conn, $doctor_id) {
     $doctor_id = intval($doctor_id);
 
     try {
-        // build a 30-day (or configurable) window from today to show upcoming availability
         $start = new DateTime();
         $end = (new DateTime())->modify('+30 days');
-
-        // get clinic hours
-        $bh_query = "SELECT setting_value FROM clinic_settings WHERE setting_key = 'business_hours' LIMIT 1";
-        $bh_res = mysqli_query($conn, $bh_query);
-        $business_hours = [];
-        if ($bh_res && ($row = mysqli_fetch_assoc($bh_res))) {
-            $decoded = json_decode($row['setting_value'], true);
-            if (is_array($decoded)) $business_hours = $decoded;
-        }
-
-        // get holidays in window
         $first_day = $start->format('Y-m-d');
         $last_day = $end->format('Y-m-d');
-        $holidays = [];
-        $hol_query = "SELECT holiday_date, name FROM holidays WHERE holiday_date BETWEEN ? AND ?";
-        $hol_stmt = mysqli_prepare($conn, $hol_query);
-        mysqli_stmt_bind_param($hol_stmt, "ss", $first_day, $last_day);
-        mysqli_stmt_execute($hol_stmt);
-        $hol_res = mysqli_stmt_get_result($hol_stmt);
-        while ($h = mysqli_fetch_assoc($hol_res)) {
-            $holidays[$h['holiday_date']] = $h['name'];
-        }
 
         // get doctor's explicit availability/unavailability
-        $avail_query = "SELECT date, start_time, end_time, availability_type, reason, is_all_day 
-                       FROM doctor_availability 
-                       WHERE doctor_id = ? 
-                       AND date BETWEEN ? AND ?";
+        $avail_query = "SELECT specific_date as date, start_time, end_time, availability_type, reason, is_all_day
+                       FROM doctor_availability
+                       WHERE doctor_id = ?
+                       AND specific_date BETWEEN ? AND ?
+                       AND active = 1";
         $avail_stmt = mysqli_prepare($conn, $avail_query);
         mysqli_stmt_bind_param($avail_stmt, "iss", $doctor_id, $first_day, $last_day);
         mysqli_stmt_execute($avail_stmt);
@@ -1175,7 +1160,32 @@ function get_doctor_availability($conn, $doctor_id) {
             $doctor_avail_map[$a['date']][] = $a;
         }
 
-        $period = new DatePeriod($start, new DateInterval('P1D'), $end->modify('+1 day'));
+        // get clinic hours
+        $business_hours = [];
+        $bh_query = "SELECT setting_value FROM clinic_settings WHERE setting_key = 'business_hours' LIMIT 1";
+        $bh_res = mysqli_query($conn, $bh_query);
+        if ($bh_res && ($row = mysqli_fetch_assoc($bh_res))) {
+            $decoded = json_decode($row['setting_value'], true);
+            if (is_array($decoded)) $business_hours = $decoded;
+        }
+
+        // get holidays (if table exists)
+        $holidays = [];
+        $hol_check = mysqli_query($conn, "SHOW TABLES LIKE 'holidays'");
+        if ($hol_check && mysqli_num_rows($hol_check) > 0) {
+            $hol_query = "SELECT date, name FROM holidays WHERE date BETWEEN ? AND ?";
+            $hol_stmt = mysqli_prepare($conn, $hol_query);
+            if ($hol_stmt) {
+                mysqli_stmt_bind_param($hol_stmt, "ss", $first_day, $last_day);
+                mysqli_stmt_execute($hol_stmt);
+                $hol_res = mysqli_stmt_get_result($hol_stmt);
+                while ($h = mysqli_fetch_assoc($hol_res)) {
+                    $holidays[$h['date']] = $h['name'];
+                }
+            }
+        }
+
+        $period = new DatePeriod($start, new DateInterval('P1D'), (clone $end)->modify('+1 day'));
 
         foreach ($period as $dt) {
             $date = $dt->format('Y-m-d');
@@ -1187,10 +1197,20 @@ function get_doctor_availability($conn, $doctor_id) {
                 $clinic_close = $business_hours[$dayLower]['close'];
             }
 
-            if (empty($clinic_open)) continue; // clinic closed this weekday
+            // If no business hours configured, default to weekday schedule
+            if (empty($clinic_open) && empty($business_hours)) {
+                $dayNum = $dt->format('N'); // 1=Mon, 7=Sun
+                if ($dayNum <= 6) { // Mon-Sat
+                    $clinic_open = '08:00';
+                    $clinic_close = '17:00';
+                } else {
+                    continue; // Sunday closed
+                }
+            } elseif (empty($clinic_open)) {
+                continue; // clinic closed this weekday
+            }
 
             if (isset($holidays[$date])) {
-                // treat as unavailable
                 $availability[] = [
                     'date' => $date,
                     'available' => false,
@@ -1200,7 +1220,6 @@ function get_doctor_availability($conn, $doctor_id) {
                 continue;
             }
 
-            // default available for clinic hours
             $slot = [
                 'date' => $date,
                 'available' => true,
@@ -1211,8 +1230,8 @@ function get_doctor_availability($conn, $doctor_id) {
 
             if (isset($doctor_avail_map[$date])) {
                 $entries = $doctor_avail_map[$date];
-                // UNAVAILABLE entries take precedence unless doctor explicitly marked AVAILABLE during clinic open hours
                 $isUnavailable = false;
+                $reason = '';
                 $avail_override = null;
                 foreach ($entries as $e) {
                     if ($e['availability_type'] === 'UNAVAILABLE') {
@@ -1240,7 +1259,6 @@ function get_doctor_availability($conn, $doctor_id) {
                             'end_time' => $clinic_close,
                             'source' => 'doctor_available_all_day'
                         ];
-                        continue;
                     } else {
                         $availability[] = [
                             'date' => $date,
@@ -1249,12 +1267,11 @@ function get_doctor_availability($conn, $doctor_id) {
                             'end_time' => ($avail_override['end_time'] ?: $clinic_close),
                             'source' => 'doctor_available_custom'
                         ];
-                        continue;
                     }
+                    continue;
                 }
             }
 
-            // default clinic slot
             $availability[] = array_merge($slot, ['available' => true]);
         }
 
@@ -1740,11 +1757,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 </head>
 <body class="flex">
+    <!-- Mobile Menu Button -->
+    <button onclick="toggleSidebar()" class="mobile-menu-btn fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg text-gray-700 hover:text-pink-500 transition-colors">
+        <i class="fas fa-bars text-xl"></i>
+    </button>
+    <!-- Mobile Overlay -->
+    <div id="sidebarOverlay" class="fixed inset-0 bg-black/40 z-30 hidden" onclick="toggleSidebar()"></div>
+
     <!-- Notification System -->
     <div id="notification" class="notification hidden"></div>
 
     <!-- Sidebar -->
-    <div class="sidebar w-64 text-white">
+    <div id="sidebar" class="sidebar w-64 text-white">
         <div class="p-6">
             <h1 class="text-2xl font-inter font-bold mb-8 flex items-center">
                 <i class="fas fa-stethoscope mr-2"></i>
@@ -2054,25 +2078,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <!-- Schedule / Calendar Section -->
         <div id="schedule-section" class="section-content p-6 hidden">
             <div class="mb-8">
-                <div class="flex justify-between items-center">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
-                        <h1 class="text-3xl font-inter font-bold text-gray-800 mb-2">My Schedule</h1>
-                        <p class="text-gray-600">View and manage your appointment calendar</p>
+                        <h1 class="text-2xl md:text-3xl font-inter font-bold text-gray-800 mb-2">My Schedule</h1>
+                        <p class="text-gray-600 text-sm md:text-base">View and manage your appointment calendar & availability</p>
                     </div>
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
                 <!-- Calendar -->
                 <div class="lg:col-span-2">
-                    <div class="card card-hover p-6">
+                    <div class="card card-hover p-4 md:p-6">
                         <div id="doctorCalendar"></div>
                     </div>
                 </div>
 
-                <!-- Selected Day Details -->
-                <div>
-                    <div class="card card-hover p-6 mb-6">
+                <!-- Selected Day Details & Availability -->
+                <div class="space-y-6">
+                    <div class="card card-hover p-4 md:p-6">
                         <h3 class="text-lg font-inter font-semibold text-gray-800 mb-4">
                             <i class="fas fa-list-ul mr-2 text-primary"></i>
                             <span id="selectedDateTitle">Today's Appointments</span>
@@ -2085,8 +2109,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </div>
                     </div>
 
+                    <!-- Set Unavailability -->
+                    <div class="card card-hover p-4 md:p-6">
+                        <h3 class="text-lg font-inter font-semibold text-gray-800 mb-4">
+                            <i class="fas fa-ban mr-2 text-red-500"></i>
+                            Set Unavailability
+                        </h3>
+                        <p class="text-sm text-gray-500 mb-4">Click a future date on the calendar to toggle your availability. You can also use the form below.</p>
+                        <form id="setUnavailableForm" class="space-y-3">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            <input type="hidden" name="action" value="set_unavailable">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                                <input type="date" name="date" id="unavailableDate" required min="<?php echo date('Y-m-d'); ?>"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Reason (optional)</label>
+                                <input type="text" name="reason" id="unavailableReason" placeholder="e.g., Personal leave, Conference..."
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                            </div>
+                            <div class="flex items-center">
+                                <input type="checkbox" name="is_all_day" id="unavailableAllDay" checked class="mr-2 rounded text-primary focus:ring-primary">
+                                <label for="unavailableAllDay" class="text-sm text-gray-700">All day</label>
+                            </div>
+                            <button type="submit" class="w-full px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors">
+                                <i class="fas fa-ban mr-1"></i> Mark Unavailable
+                            </button>
+                        </form>
+                    </div>
+
                     <!-- Calendar Legend -->
-                    <div class="card card-hover p-6">
+                    <div class="card card-hover p-4 md:p-6">
                         <h3 class="text-lg font-inter font-semibold text-gray-800 mb-4">Legend</h3>
                         <div class="space-y-3">
                             <div class="flex items-center">
